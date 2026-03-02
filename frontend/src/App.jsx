@@ -14,7 +14,7 @@ function App() {
   return (
     <AuthProvider>
       <ComplaintProvider>
-        <Router>
+        <Router basename="/CivicLens">
 
           <div className="min-h-screen bg-gray-50 flex flex-col">
             <Navbar />
