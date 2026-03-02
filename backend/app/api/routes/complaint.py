@@ -17,12 +17,15 @@ from ...models.schema import (
     PredictionResponse,
     StatsResponse,
     ErrorResponse,
+    NotificationRecord,
 )
 from ...services.prediction_service import get_prediction_service
 from ...core.security import sanitize_input
 from ...db.database import get_db
 from ...db import crud
 from ...models.complaint_model import VALID_CATEGORIES, CATEGORY_TO_DEPARTMENT
+from ...core.security import get_current_user_id, get_current_user
+from ...db.models import User
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +46,7 @@ router = APIRouter(prefix="/complaints", tags=["Complaints"])
 async def submit_complaint(
     request: ComplaintSubmitRequest,
     db: AsyncSession = Depends(get_db),
+    current_user_id: Optional[int] = Depends(get_current_user_id),
 ) -> ComplaintRecord:
     """
     Full complaint submission:
@@ -89,6 +93,7 @@ async def submit_complaint(
         department=department,
         urgency=urgency,
         confidence=confidence,
+        user_id=current_user_id,
     )
 
     logger.info(
@@ -106,7 +111,7 @@ async def submit_complaint(
     response_model=List[ComplaintRecord],
     status_code=status.HTTP_200_OK,
     summary="List Complaints",
-    description="Retrieve complaints with optional filters for department, status, and urgency.",
+    description="Retrieve complaints. Department users see only their assigned department's complaints.",
 )
 async def list_complaints(
     department: Optional[str] = Query(None, description="Filter by department name"),
@@ -115,10 +120,23 @@ async def list_complaints(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user),
 ) -> List[ComplaintRecord]:
+    # Authorization logic
+    if not current_user:
+         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    
+    if current_user.role == "citizen":
+         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Citizens cannot access the department view")
+    
+    # Enforce department isolation
+    target_dept = current_user.assigned_department
+    if not target_dept:
+         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User is not assigned to any department")
+
     complaints = await crud.get_complaints(
         db,
-        department=department,
+        department=target_dept,
         status=status_filter,
         urgency=urgency,
         skip=skip,
@@ -164,6 +182,73 @@ async def get_complaint(
     return complaint
 
 
+@router.get(
+    "/search/{tracking_number}",
+    response_model=ComplaintRecord,
+    status_code=status.HTTP_200_OK,
+    summary="Search by Tracking Number",
+    description="Find a complaint using its unique tracking number (e.g. CL-2026-00001).",
+)
+async def search_complaint(
+    tracking_number: str,
+    db: AsyncSession = Depends(get_db),
+) -> ComplaintRecord:
+    complaint = await crud.get_complaint_by_tracking(db, tracking_number)
+    if not complaint:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No complaint found with tracking number {tracking_number}"
+        )
+    return complaint
+
+
+@router.get(
+    "/me/complaints",
+    response_model=List[ComplaintRecord],
+    status_code=status.HTTP_200_OK,
+    summary="My Complaints",
+)
+async def get_my_complaints(
+    db: AsyncSession = Depends(get_db),
+    current_user_id: int = Depends(get_current_user_id),
+) -> List[ComplaintRecord]:
+    if not current_user_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    return await crud.get_user_complaints(db, current_user_id)
+
+
+@router.get(
+    "/me/notifications",
+    response_model=List[NotificationRecord],
+    status_code=status.HTTP_200_OK,
+    summary="My Notifications",
+)
+async def get_my_notifications(
+    db: AsyncSession = Depends(get_db),
+    current_user_id: int = Depends(get_current_user_id),
+) -> List[NotificationRecord]:
+    if not current_user_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    return await crud.get_user_notifications(db, current_user_id)
+
+
+@router.patch(
+    "/me/notifications/{notification_id}/read",
+    status_code=status.HTTP_200_OK,
+    summary="Mark Notification Read",
+)
+async def mark_read(
+    notification_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user_id: int = Depends(get_current_user_id),
+):
+    success = await crud.mark_notification_read(db, notification_id)
+    if not success:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Notification not found")
+    return {"status": "success"}
+
+
+
 # ---------------------------------------------------------------------------
 # PATCH /{id}/status  – department updates status
 # ---------------------------------------------------------------------------
@@ -179,17 +264,28 @@ async def update_status(
     complaint_id: int,
     update: ComplaintStatusUpdate,
     db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user),
 ) -> ComplaintRecord:
-    complaint = await crud.update_complaint_status(
+    # Authorization check
+    if not current_user or current_user.role != "department":
+         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only authorized department personnel can update status")
+    
+    # Fetch complaint to check department alignment
+    complaint = await crud.get_complaint(db, complaint_id)
+    if not complaint:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Complaint not found")
+    
+    if complaint.department != current_user.assigned_department:
+         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You can only update complaints for your assigned department")
+
+    updated_complaint = await crud.update_complaint_status(
         db,
         complaint_id,
         status=update.status.value,
         notes=update.notes,
     )
-    if not complaint:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Complaint not found")
-    logger.info(f"Complaint {complaint.tracking_number} status → {update.status.value}")
-    return complaint
+    logger.info(f"Complaint {updated_complaint.tracking_number} status → {update.status.value}")
+    return updated_complaint
 
 
 # ---------------------------------------------------------------------------

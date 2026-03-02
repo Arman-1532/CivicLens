@@ -3,11 +3,20 @@
  * @param {string} dateString - ISO date string from backend.
  * @returns {string} Formatted date and time.
  */
-export const formatToBDTime = (dateString) => {
+export const formatToBDDate = (dateString) => {
     if (!dateString) return '';
 
     try {
-        const date = new Date(dateString);
+        // Ensure the date string is treated as UTC if it doesn't have a timezone indicator
+        let normalizedDateString = dateString;
+        if (typeof dateString === 'string' && !dateString.includes('Z') && !dateString.includes('+') && !dateString.includes('-')) {
+            // Check if it's a typical ISO string without TZ
+            if (dateString.includes('T')) {
+                normalizedDateString = `${dateString}Z`;
+            }
+        }
+
+        const date = new Date(normalizedDateString);
 
         // Check if date is valid
         if (isNaN(date.getTime())) return dateString;
@@ -16,10 +25,7 @@ export const formatToBDTime = (dateString) => {
             timeZone: 'Asia/Dhaka',
             day: '2-digit',
             month: 'short',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-            hour12: true
+            year: 'numeric'
         }).format(date);
     } catch (error) {
         console.error('Error formatting date:', error);

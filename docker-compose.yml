@@ -1,0 +1,22 @@
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/civiclens.db:/app/civiclens.db
+      - ./backend/trained_models:/app/trained_models
+    environment:
+      - DATABASE_URL=sqlite:///./civiclens.db
+    restart: always
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        - VITE_API_URL=http://localhost:8000
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: always

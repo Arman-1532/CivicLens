@@ -3,12 +3,13 @@ API package initialization.
 """
 
 from fastapi import APIRouter
-from .routes import complaint, health
+from .routes import complaint, health, auth
 
 # Create main API router
 api_router = APIRouter()
 
 # Include route modules
 api_router.include_router(health.router)
+api_router.include_router(auth.router)
 api_router.include_router(complaint.router)
 

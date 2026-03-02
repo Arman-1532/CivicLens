@@ -1,15 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getComplaints, updateComplaintStatus } from '../services/api';
-import { formatToBDTime } from '../utils/dateUtils';
+import { formatToBDDate } from '../utils/dateUtils';
+import { useAuth } from '../context/AuthContext';
+import { useNavigate } from 'react-router-dom';
+import { CATEGORIES } from '../constants/categories';
 
-const DEPARTMENTS = [
-    'Anti-Corruption Bureau',
-    'Public Utilities Department',
-    'Administrative Services',
-    "Women's Commission / HR",
-    'Finance Department',
-    'Police Department / Law Enforcement',
-];
+const DEPARTMENTS = CATEGORIES.map(c => c.name);
 
 const STATUS_LABELS = {
     pending: { label: 'Pending', color: 'bg-yellow-100 text-yellow-800 border-yellow-200' },
@@ -120,38 +116,84 @@ function UpdateModal({ complaint, onClose, onSaved }) {
 }
 
 function DepartmentView() {
-    const [selectedDept, setSelectedDept] = useState(DEPARTMENTS[0]);
+    const { user, loading: authLoading } = useAuth();
+    const navigate = useNavigate();
     const [statusFilter, setStatusFilter] = useState('all');
-    const [complaints, setComplaints] = useState([]);
+    const [allComplaints, setAllComplaints] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState('');
     const [modalComplaint, setModalComplaint] = useState(null);
 
     const load = useCallback(async () => {
+        if (!user || user.role !== 'department' || !user.assigned_department) return;
+
         setIsLoading(true);
         setError('');
         try {
-            const filters = { department: selectedDept };
-            if (statusFilter !== 'all') filters.status = statusFilter;
-            const data = await getComplaints(filters);
-            setComplaints(data);
+            const data = await getComplaints({ department: user.assigned_department });
+            setAllComplaints(data);
         } catch (err) {
             setError(err.message || 'Failed to load complaints');
         } finally {
             setIsLoading(false);
         }
-    }, [selectedDept, statusFilter]);
+    }, [user]);
 
-    useEffect(() => { load(); }, [load]);
+    useEffect(() => {
+        if (user?.assigned_department) {
+            load();
+        }
+    }, [load, user]);
 
     const handleSaved = (updated) => {
-        setComplaints((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+        setAllComplaints((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
         setModalComplaint(null);
     };
 
-    // Stats
+    // State for local dev / demo if needed (can be expanded)
     const stats = { pending: 0, in_progress: 0, resolved: 0 };
-    complaints.forEach((c) => { if (stats[c.status] !== undefined) stats[c.status]++; });
+    allComplaints.forEach((c) => { if (stats[c.status] !== undefined) stats[c.status]++; });
+
+    // Filter complaints for the table
+    const displayedComplaints = statusFilter === 'all'
+        ? allComplaints
+        : allComplaints.filter(c => c.status === statusFilter);
+
+    // Filter pending complaints for notifications
+    const pendingNotifications = allComplaints.filter(c => c.status === 'pending');
+
+    if (!authLoading && (!user || user.role !== 'department')) {
+        return (
+            <div className="max-w-2xl mx-auto mt-20 text-center">
+                <div className="bg-white rounded-2xl shadow-xl p-10 border border-gray-100">
+                    <div className="w-20 h-20 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-6">
+                        <svg className="w-10 h-10 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                        </svg>
+                    </div>
+                    <h2 className="text-2xl font-bold text-gray-900 mb-2">Official Access Required</h2>
+                    <p className="text-gray-600 mb-8">
+                        This portal is reserved for authorized government department personnel.
+                        Please log in with your official credentials to manage complaints.
+                    </p>
+                    <div className="flex flex-col gap-3">
+                        <button
+                            onClick={() => navigate('/login')}
+                            className="bg-blue-600 text-white px-8 py-3 rounded-xl font-bold hover:bg-blue-700 transition-all shadow-lg hover:shadow-blue-200"
+                        >
+                            Go to Official Login
+                        </button>
+                        <button
+                            onClick={() => navigate('/')}
+                            className="text-gray-500 hover:text-gray-800 font-medium text-sm transition-colors"
+                        >
+                            Return to Public Homepage
+                        </button>
+                    </div>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="max-w-6xl mx-auto">
@@ -160,31 +202,76 @@ function DepartmentView() {
                 <p className="text-gray-600 mt-1">View and manage complaints assigned to your department</p>
             </div>
 
-            {/* Department Selector */}
-            <div className="bg-white rounded-xl shadow p-5 mb-6">
-                <label className="block text-sm font-medium text-gray-700 mb-2">Select Department</label>
-                <select
-                    value={selectedDept}
-                    onChange={(e) => setSelectedDept(e.target.value)}
-                    className="w-full md:w-auto min-w-[320px] px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                >
-                    {DEPARTMENTS.map((d) => <option key={d} value={d}>{d}</option>)}
-                </select>
+            {/* Department Info Box (Locked) */}
+            <div className="bg-blue-600 rounded-xl shadow-lg p-6 mb-8 text-white">
+                <div className="flex justify-between items-center">
+                    <div>
+                        <p className="text-blue-100 text-sm uppercase tracking-wider font-semibold mb-1">Official Resource Access</p>
+                        <h2 className="text-2xl font-bold">{user?.assigned_department || 'Department Access'}</h2>
+                        <div className="flex items-center mt-2 text-blue-100 text-sm">
+                            <span className="w-2 h-2 bg-green-400 rounded-full mr-2"></span>
+                            Logged in as: <span className="font-semibold px-1">{user?.full_name}</span> (Official)
+                        </div>
+                    </div>
+                    <div className="hidden md:block">
+                        <svg className="w-16 h-16 text-white/20" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
+                        </svg>
+                    </div>
+                </div>
             </div>
 
-            {/* Stats */}
-            <div className="grid grid-cols-3 gap-4 mb-6">
-                <div className="bg-white rounded-xl shadow p-5">
-                    <p className="text-xs text-gray-500 mb-1 uppercase tracking-wide">Pending</p>
-                    <p className="text-3xl font-bold text-yellow-600">{stats.pending}</p>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+                {/* Stats */}
+                <div className="lg:col-span-2 grid grid-cols-3 gap-4">
+                    <div className="bg-white rounded-xl shadow p-5">
+                        <p className="text-xs text-gray-500 mb-1 uppercase tracking-wide">Pending</p>
+                        <p className="text-3xl font-bold text-yellow-600">{stats.pending}</p>
+                    </div>
+                    <div className="bg-white rounded-xl shadow p-5">
+                        <p className="text-xs text-gray-500 mb-1 uppercase tracking-wide">In Progress</p>
+                        <p className="text-3xl font-bold text-blue-600">{stats.in_progress}</p>
+                    </div>
+                    <div className="bg-white rounded-xl shadow p-5">
+                        <p className="text-xs text-gray-500 mb-1 uppercase tracking-wide">Resolved</p>
+                        <p className="text-3xl font-bold text-green-600">{stats.resolved}</p>
+                    </div>
                 </div>
-                <div className="bg-white rounded-xl shadow p-5">
-                    <p className="text-xs text-gray-500 mb-1 uppercase tracking-wide">In Progress</p>
-                    <p className="text-3xl font-bold text-blue-600">{stats.in_progress}</p>
-                </div>
-                <div className="bg-white rounded-xl shadow p-5">
-                    <p className="text-xs text-gray-500 mb-1 uppercase tracking-wide">Resolved</p>
-                    <p className="text-3xl font-bold text-green-600">{stats.resolved}</p>
+
+                {/* Notifications Panel */}
+                <div className="bg-white rounded-xl shadow flex flex-col max-h-[140px] overflow-hidden">
+                    <div className="px-4 py-3 border-b border-gray-100 bg-gray-50 flex items-center justify-between sticky top-0">
+                        <h3 className="text-sm font-bold text-gray-800 flex items-center gap-2">
+                            <svg className="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                            </svg>
+                            Action Required
+                        </h3>
+                        {pendingNotifications.length > 0 && (
+                            <span className="bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
+                                {pendingNotifications.length} New
+                            </span>
+                        )}
+                    </div>
+                    <div className="overflow-y-auto flex-1 p-2">
+                        {isLoading ? (
+                            <p className="text-xs text-gray-400 text-center py-4">Loading...</p>
+                        ) : pendingNotifications.length === 0 ? (
+                            <p className="text-xs text-gray-400 text-center py-4">No pending requests.</p>
+                        ) : (
+                            <div className="space-y-2">
+                                {pendingNotifications.map(c => (
+                                    <div key={c.id} onClick={() => setModalComplaint(c)} className="p-3 bg-red-50/50 hover:bg-red-50 rounded-lg border border-red-100 cursor-pointer transition-colors">
+                                        <div className="flex justify-between items-start mb-1">
+                                            <span className="text-xs font-mono font-bold text-red-700">{c.tracking_number}</span>
+                                            <span className="text-[10px] text-gray-500">{formatToBDDate(c.created_at)}</span>
+                                        </div>
+                                        <p className="text-xs text-gray-700 line-clamp-1">{c.complaint_text}</p>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
                 </div>
             </div>
 
@@ -219,7 +306,7 @@ function DepartmentView() {
                         <p className="text-red-600">{error}</p>
                         <button onClick={load} className="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm">Retry</button>
                     </div>
-                ) : complaints.length === 0 ? (
+                ) : displayedComplaints.length === 0 ? (
                     <div className="p-12 text-center">
                         <div className="w-14 h-14 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3">
                             <svg className="w-7 h-7 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -245,7 +332,7 @@ function DepartmentView() {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-200">
-                                {complaints.map((c) => (
+                                {displayedComplaints.map((c) => (
                                     <tr key={c.id} className="hover:bg-gray-50 transition-colors">
                                         <td className="px-5 py-4 font-mono text-xs text-blue-700 whitespace-nowrap">{c.tracking_number}</td>
                                         <td className="px-5 py-4">
@@ -267,7 +354,7 @@ function DepartmentView() {
                                         </td>
                                         <td className="px-5 py-4"><StatusBadge status={c.status} /></td>
                                         <td className="px-5 py-4 text-xs text-gray-400 whitespace-nowrap">
-                                            {formatToBDTime(c.created_at)}
+                                            {formatToBDDate(c.created_at)}
                                         </td>
                                         <td className="px-5 py-4">
                                             <button

@@ -95,7 +95,7 @@ function Login() {
                             <option value="Anti-Corruption Bureau">Anti-Corruption Bureau</option>
                             <option value="Public Utilities Department">Public Utilities Department</option>
                             <option value="Administrative Services">Administrative Services</option>
-                            <option value="Women's Commission / HR">Women's Commission / HR</option>
+                            <option value="Women's Commission / HR">Women's Commission / Harassment</option>
                             <option value="Finance Department">Finance Department</option>
                             <option value="Police Department / Law Enforcement">Police Department / Law Enforcement</option>
                         </select>

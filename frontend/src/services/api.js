@@ -9,6 +9,14 @@ const api = axios.create({
   timeout: 30000,
 });
 
+// Add token to requests if available
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('token');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
 api.interceptors.request.use(
   (config) => { console.log(`API Request: ${config.method?.toUpperCase()} ${config.url}`); return config; },
   (error) => { console.error('API Request Error:', error); return Promise.reject(error); }
@@ -35,8 +43,8 @@ export const getComplaints = async (filters = {}) => {
   try {
     const params = {};
     if (filters.department) params.department = filters.department;
-    if (filters.status)     params.status     = filters.status;
-    if (filters.urgency)    params.urgency    = filters.urgency;
+    if (filters.status) params.status = filters.status;
+    if (filters.urgency) params.urgency = filters.urgency;
     const response = await api.get('/api/v1/complaints', { params });
     return response.data;
   } catch (error) {
@@ -122,4 +130,51 @@ export const classifyComplaint = async (text) => {
   }
 };
 
+/** AUTH API */
+export const loginUser = async (email, password) => {
+  const formData = new FormData();
+  formData.append('username', email);
+  formData.append('password', password);
+  const response = await api.post('/api/v1/auth/token', formData, {
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+  });
+  return response.data;
+};
+
+export const registerUser = async (userData) => {
+  const response = await api.post('/api/v1/auth/register', userData);
+  return response.data;
+};
+
+export const getUserMe = async () => {
+  const response = await api.get('/api/v1/auth/me');
+  return response.data;
+};
+
+/** USER COMPLAINTS & NOTIFICATIONS */
+export const getMyComplaints = async () => {
+  const response = await api.get('/api/v1/complaints/me/complaints');
+  return response.data;
+};
+
+export const getMyNotifications = async () => {
+  const response = await api.get('/api/v1/complaints/me/notifications');
+  return response.data;
+};
+
+export const markNotificationRead = async (id) => {
+  const response = await api.patch(`/api/v1/complaints/me/notifications/${id}/read`);
+  return response.data;
+};
+
+/** SEARCH */
+export const searchComplaintByTracking = async (trackingNumber) => {
+  try {
+    const response = await api.get(`/api/v1/complaints/search/${trackingNumber}`);
+    return response.data;
+  } catch (error) {
+    if (error.response?.status === 404) throw new Error('Complaint not found');
+    throw new Error('Failed to search complaint');
+  }
+};
 export default api;
